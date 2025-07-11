@@ -1,40 +1,102 @@
 # Arkanoid Game
 
-![image](screenshot.png)
+![Screenshot](screenshot1.png)
 
-## Preparation
+This is my enchanced version of the classic Arkanoid game, built with **Python** and **Pygame**.  
 
-1. Do a Preflight check:
-    1. Python3
-    1. GIT
-1. Clone this git
-1. OSX & Linux: Run `sh install.sh` OR do the Manual Install:
-    1. Create new VENV: `python3 -m venv env`
-    1. Activate your VENV: `sh ./env/bin/activate`
-    1. Install deps: `pip3 install -r requirements.txt`
-1. Go to the working directory: `cd work`
-1. Run the app: `python3 main.py`
+---
 
-## Phases Description:
+## How to Run
 
-To look for the additions, seek comments started with "!!!"
+### Requirements:
 
-1. Open an empty window with PyGame (m)
-1. Add Paddle, that could be controlled by the Player
-1. Implement Ball and add it to the game scene
-1. Adding Bricks
-1. Add Win / Lose state
-1. Add scoring and lives (m)
-1. Bonuses
-1. Sounds (m)
-1. More bonuses
-1. Messages
-1. Add pixel explosions (and fireworks)
-1. Add Title Screen
+- Python 3
+- Git
 
-## What's next?
+### Setup Instructions:
 
-1. Add `mute` button
-1. Add more levels
-1. Add `gameover` screen
-1. Add more powerups
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/wannadiexd/python-arkanoid
+   cd python-arkanoid
+   ```
+
+2. (Linux/macOS) Run:
+    ```bash
+    sh install.sh
+    ```
+    Or install manually:
+    ```bash
+    python3 -m venv env
+    source env/bin/activate
+    pip install -r requirements.txt
+    ```
+3. Go to the directory:
+    ```bash
+    cd final_version
+    ```
+4. Launch the game:
+    ```bash
+    python3 main.py
+    ```
+---
+
+## What I Added/Improved
+
+### Power-Ups
+
+I added five new power-ups to make the gameplay more dynamic:
+
+* Multi Ball – Spawns extra balls
+
+* Extra Life – Adds one life
+
+* Strong Ball – Breaks bricks without bouncing
+
+* Fast Ball – Doubles ball speed (negative effect)
+
+* Shrink Paddle – Reduces paddle size (negative effect)
+
+### Code Improvements
+
+* Refactored the Ball and Paddle classes for power-up handling
+
+* Fixed bugs in ball-brick collision
+
+* Improved game state save/restore
+
+* Added support for multiple active balls
+
+### Gameplay & Balance
+
+* Power-ups apply to all active balls
+
+    * Duration tuning:
+
+        - Strong Ball: 15s
+
+        - Fast/Shrink: 10s / 7.5s
+
+    * Sounds play per power-up
+
+    * Losing the main ball doesn’t end the game if others are active
+
+### UI Additions
+
+* Mute sound button
+
+* Exit button
+
+* Game over effects
+
+* Pause menu with resume
+
+* Level indicator
+
+* Game state is saved during pause
+
+## Some screenshots of game:
+
+![Screenshot](screenshot2.png)
+
+![Screenshot](screenshot3.png)
