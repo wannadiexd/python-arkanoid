@@ -17,6 +17,8 @@ pygame.display.set_caption("PyGame Arkanoid")
 
 # -- Colors --
 BG_COLOR = pygame.Color('grey12')
+PAUSE_OVERLAY_COLOR = (0, 0, 0, 180)  # Semi-transparent black
+GAME_OVER_BG_COLOR = pygame.Color(40, 0, 0)  # Dark red background for game over
 BRICK_COLORS = [(178, 34, 34), (255, 165, 0), (255, 215, 0), (50, 205, 50)]
 BUTTON_COLOR = (100, 100, 100)
 BUTTON_HOVER_COLOR = (150, 150, 150)
@@ -32,6 +34,7 @@ title_font = pygame.font.Font(None, 70)
 game_font = pygame.font.Font(None, 40)
 message_font = pygame.font.Font(None, 30)
 button_font = pygame.font.Font(None, 36)
+big_font = pygame.font.Font(None, 90)  # Larger font for game over
 
 # -- Sound Setup --
 try:
@@ -221,12 +224,12 @@ LEVELS = [
     {"name": "Level 5", "create_function": create_checkerboard_wall, "args": {}}
 ]
 
-# -- Main Menu Setup --
+# -- Menu and Button Setup --
 def create_level_buttons():
     buttons = []
     button_width = 200
     button_height = 50
-    button_y_start = 200
+    button_y_start = 150
     button_spacing = 60
     
     for i, level in enumerate(LEVELS):
@@ -242,24 +245,33 @@ def create_level_buttons():
 
 level_buttons = create_level_buttons()
 
-# Create resume game button
-resume_button_rect = pygame.Rect(
+# Main menu play button
+play_button_rect = pygame.Rect(
     (screen_width - 200) // 2,
-    140,
+    300,
     200,
     50
 )
 
-# Create main menu button (clears saved game)
-main_menu_button_rect = pygame.Rect(
+# Back button for level select screen
+back_button_rect = pygame.Rect(
     (screen_width - 200) // 2,
-    200,
+    500,
     200,
     50
 )
 
-# Create back to menu button
-back_to_menu_button_rect = pygame.Rect(10, 10, 120, 40)
+# Pause button for in-game
+pause_button_rect = pygame.Rect(10, 10, 120, 40)
+
+# Pause menu buttons
+pause_resume_button_rect = pygame.Rect((screen_width - 200) // 2, 200, 200, 50)
+pause_level_select_button_rect = pygame.Rect((screen_width - 200) // 2, 270, 200, 50)
+pause_exit_button_rect = pygame.Rect((screen_width - 200) // 2, 340, 200, 50)
+
+# Game over menu button
+game_over_menu_button_rect = pygame.Rect((screen_width - 200) // 2, 400, 200, 50)
+game_over_retry_button_rect = pygame.Rect((screen_width - 200) // 2, 330, 200, 50)
 
 def draw_button(screen, rect, text, hover=False, is_resume=False, is_reset=False):
     if is_resume:
@@ -286,9 +298,12 @@ power_ups = []
 lasers = []
 particles = []
 fireworks = []
+game_over_particles = []
+game_over_time = 0
 
 # --- Game Variables ---
 game_state = 'main_menu'  # Start with main menu instead of title screen
+previous_state = None  # Track where we came from for back button functionality
 score = 0
 lives = 3
 display_message = ""
@@ -386,6 +401,25 @@ def reset_game(level_index=0):
     particles.clear()
     fireworks.clear()
 
+# Draw semi-transparent overlay for pause screen
+def draw_pause_overlay(screen):
+    overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180))  # Semi-transparent black
+    screen.blit(overlay, (0, 0))
+
+# Create game over explosion effect
+def create_game_over_explosion():
+    global game_over_particles, game_over_time
+    game_over_particles = []
+    # Create explosion particles
+    for _ in range(150):
+        x = random.randint(0, screen_width)
+        y = random.randint(0, screen_height)
+        color = (random.randint(180, 255), random.randint(0, 80), random.randint(0, 50))
+        particle = Particle(x, y, color, 2, 6, 2, 6, 0.1)
+        game_over_particles.append(particle)
+    game_over_time = 180  # How long the effect lasts
+
 # -- Main Game Loop --
 while True:
     # Get mouse position for button hover effects
@@ -407,10 +441,14 @@ while True:
                     game_state = 'main_menu'
                     has_paused_game = False  # Reset paused game flag when game is over
             
-            # ESC key to return to main menu with saved state (pause)
-            if event.key == pygame.K_ESCAPE and game_state == 'playing':
-                save_game_state()  # Save current game state before returning to menu
-                game_state = 'main_menu'
+            # ESC key to toggle pause
+            if event.key == pygame.K_ESCAPE:
+                if game_state == 'playing':
+                    save_game_state()
+                    previous_state = game_state
+                    game_state = 'paused'
+                elif game_state == 'paused':
+                    game_state = 'playing'
                 
             if event.key == pygame.K_f and paddle.has_laser and game_state == 'playing':
                 lasers.append(Laser(paddle.rect.centerx - 30, paddle.rect.top))
@@ -424,16 +462,20 @@ while True:
             if mute_button_rect.collidepoint(event.pos):
                 toggle_mute()
                 
-            # Main menu level selection
+            # Main menu interactions
             if game_state == 'main_menu':
-                # Check resume button first if available
-                if has_paused_game and resume_button_rect.collidepoint(event.pos):
-                    restore_game_state()
-                    game_state = 'playing'
-                
-                # Check main menu button (clears saved game)
-                if has_paused_game and main_menu_button_rect.collidepoint(event.pos):
-                    has_paused_game = False  # Clear the saved game
+                if play_button_rect.collidepoint(event.pos):
+                    previous_state = game_state
+                    game_state = 'level_select'
+            
+            # Level select screen interactions
+            elif game_state == 'level_select':
+                # Check back button - return to previous state
+                if back_button_rect.collidepoint(event.pos):
+                    if previous_state == 'paused':
+                        game_state = 'paused'  # Return to pause menu
+                    else:
+                        game_state = 'main_menu'  # Return to main menu
                 
                 # Check level buttons
                 for button in level_buttons:
@@ -442,10 +484,41 @@ while True:
                         game_state = 'playing'
                         has_paused_game = False  # Starting a new game clears the saved game
             
-            # Back to menu button when playing
-            if game_state == 'playing' and back_to_menu_button_rect.collidepoint(event.pos):
-                save_game_state()  # Save current game state before returning to menu
-                game_state = 'main_menu'
+            # In-game interactions
+            elif game_state == 'playing':
+                # Pause button
+                if pause_button_rect.collidepoint(event.pos):
+                    save_game_state()  # Save current game state before pausing
+                    previous_state = game_state
+                    game_state = 'paused'
+            
+            # Pause menu interactions
+            elif game_state == 'paused':
+                # Resume button
+                if pause_resume_button_rect.collidepoint(event.pos):
+                    game_state = 'playing'
+                
+                # Level select button
+                if pause_level_select_button_rect.collidepoint(event.pos):
+                    previous_state = game_state  # Remember we came from pause screen
+                    game_state = 'level_select'
+                
+                # Exit button (back to main menu and reset progress)
+                if pause_exit_button_rect.collidepoint(event.pos):
+                    game_state = 'main_menu'
+                    has_paused_game = False  # Clear saved game when exiting
+            
+            # Game over screen interactions
+            elif game_state == 'game_over':
+                # Retry button
+                if game_over_retry_button_rect.collidepoint(event.pos):
+                    reset_game(current_level)  # Restart the current level
+                    game_state = 'playing'
+                    
+                # Menu button
+                if game_over_menu_button_rect.collidepoint(event.pos):
+                    game_state = 'main_menu'
+                    has_paused_game = False
 
     # --- Drawing and Updating based on Game State ---
     screen.fill(BG_COLOR)
@@ -454,49 +527,34 @@ while True:
     if game_state == 'main_menu':
         # Draw title
         title_surface = title_font.render("ARKANOID", True, (255, 255, 255))
-        title_rect = title_surface.get_rect(center=(screen_width / 2, 80))
+        title_rect = title_surface.get_rect(center=(screen_width / 2, 180))
         screen.blit(title_surface, title_rect)
         
-        # Draw buttons for paused game if there is one
+        # Draw the play button
+        play_hover = is_button_hovered(play_button_rect, mouse_pos)
+        draw_button(screen, play_button_rect, "Play", play_hover)
+        
+        # Show resume indicator if there's a saved game
         if has_paused_game:
-            # Resume button
-            resume_hover = is_button_hovered(resume_button_rect, mouse_pos)
-            draw_button(screen, resume_button_rect, "Resume Game", resume_hover, is_resume=True)
+            resume_info = message_font.render("(You have a game in progress)", True, (200, 200, 200))
+            resume_rect = resume_info.get_rect(center=(screen_width / 2, 370))
+            screen.blit(resume_info, resume_rect)
+
+    # Level Select Screen
+    elif game_state == 'level_select':
+        # Draw title
+        title_surface = game_font.render("Select Level", True, (255, 255, 255))
+        title_rect = title_surface.get_rect(center=(screen_width / 2, 50))
+        screen.blit(title_surface, title_rect)
+        
+        # Draw level selection buttons
+        for button in level_buttons:
+            hover = is_button_hovered(button["rect"], mouse_pos)
+            draw_button(screen, button["rect"], button["text"], hover)
             
-            # Main menu button (clears saved game)
-            main_menu_hover = is_button_hovered(main_menu_button_rect, mouse_pos)
-            draw_button(screen, main_menu_button_rect, "Main Menu", main_menu_hover, is_reset=True)
-            
-            # Header for level selection
-            select_text = message_font.render("Or Select New Level:", True, (255, 255, 255))
-            select_rect = select_text.get_rect(center=(screen_width / 2, 270))
-            screen.blit(select_text, select_rect)
-            
-            # Draw level selection buttons with offset
-            for i, button in enumerate(level_buttons):
-                # Reposition buttons below the main menu option
-                button_rect = pygame.Rect(
-                    (screen_width - 200) // 2,
-                    300 + i * 60,
-                    200,
-                    50
-                )
-                button["rect"] = button_rect
-                hover = is_button_hovered(button["rect"], mouse_pos)
-                draw_button(screen, button["rect"], button["text"], hover)
-        else:
-            # Draw standard level selection buttons
-            for i, button in enumerate(level_buttons):
-                # Standard button positions
-                button_rect = pygame.Rect(
-                    (screen_width - 200) // 2,
-                    200 + i * 60,
-                    200,
-                    50
-                )
-                button["rect"] = button_rect
-                hover = is_button_hovered(button["rect"], mouse_pos)
-                draw_button(screen, button["rect"], button["text"], hover)
+        # Draw back button
+        back_hover = is_button_hovered(back_button_rect, mouse_pos)
+        draw_button(screen, back_button_rect, "Back", back_hover)
 
     # Gameplay
     elif game_state == 'playing':
@@ -509,6 +567,7 @@ while True:
             lives -= 1
             if lives <= 0:
                 game_state = 'game_over'
+                create_game_over_explosion()  # Create explosion effect
                 has_paused_game = False  # Clear paused game when game over
                 if not is_muted:
                     game_over_sound.play()
@@ -600,45 +659,127 @@ while True:
         
         # Score text
         score_text = game_font.render(f"Score: {score}", True, (255, 255, 255))
-        screen.blit(score_text, (140, 10))  # Positioned right after the menu button
+        screen.blit(score_text, (140, 10))  # Positioned right after the pause button
         
         # Lives
         lives_text = game_font.render(f"Lives: {lives}", True, (255, 255, 255))
         screen.blit(lives_text, (screen_width - lives_text.get_width() - 10 - 50, 10))
         
-        # Back to menu button
-        hover = is_button_hovered(back_to_menu_button_rect, mouse_pos)
-        draw_button(screen, back_to_menu_button_rect, "Menu", hover)
+        # Pause button
+        hover = is_button_hovered(pause_button_rect, mouse_pos)
+        draw_button(screen, pause_button_rect, "Pause", hover)
 
-    # Game Over / You Win screens
-    elif game_state in ['game_over', 'you_win']:
-        if game_state == 'you_win':
-            firework_timer -= 1
-            if firework_timer <= 0:
-                fireworks.append(Firework(screen_width, screen_height))
-                firework_timer = random.randint(20, 50)
-            
-            for firework in fireworks[:]:
-                firework.update()
-                if firework.is_dead():
-                    fireworks.remove(firework)
-            
-            for firework in fireworks:
-                firework.draw(screen)
+    # Pause Screen
+    elif game_state == 'paused':
+        # First draw the game screen underneath
+        paddle.draw(screen)
+        ball.draw(screen)
+        for brick in bricks:
+            brick.draw(screen)
+        for power_up in power_ups:
+            power_up.draw(screen)
+        for laser in lasers:
+            laser.draw(screen)
+        
+        # Draw UI elements from the game
+        level_text = game_font.render(f"Level {current_level + 1}", True, (255, 255, 255))
+        screen.blit(level_text, (screen_width // 2 - level_text.get_width() // 2, 10))
+        score_text = game_font.render(f"Score: {score}", True, (255, 255, 255))
+        screen.blit(score_text, (140, 10))
+        lives_text = game_font.render(f"Lives: {lives}", True, (255, 255, 255))
+        screen.blit(lives_text, (screen_width - lives_text.get_width() - 10 - 50, 10))
+        
+        # Draw semi-transparent overlay
+        draw_pause_overlay(screen)
+        
+        # Draw pause menu title
+        pause_title = title_font.render("PAUSED", True, (255, 255, 255))
+        pause_title_rect = pause_title.get_rect(center=(screen_width / 2, 120))
+        screen.blit(pause_title, pause_title_rect)
+        
+        # Draw pause menu buttons
+        # Resume button
+        resume_hover = is_button_hovered(pause_resume_button_rect, mouse_pos)
+        draw_button(screen, pause_resume_button_rect, "Resume", resume_hover, is_resume=True)
+        
+        # Level select button
+        level_select_hover = is_button_hovered(pause_level_select_button_rect, mouse_pos)
+        draw_button(screen, pause_level_select_button_rect, "Level Select", level_select_hover)
+        
+        # Exit button
+        exit_hover = is_button_hovered(pause_exit_button_rect, mouse_pos)
+        draw_button(screen, pause_exit_button_rect, "Exit", exit_hover, is_reset=True)
 
-        message = "GAME OVER" if game_state == 'game_over' else "YOU WIN!"
-        text_surface = game_font.render(message, True, (255, 255, 255))
-        text_rect = text_surface.get_rect(center=(screen_width / 2, screen_height / 2 - 20))
-        screen.blit(text_surface, text_rect)
+    # Game Over Screen
+    elif game_state == 'game_over':
+        # Draw a dark red background
+        screen.fill(GAME_OVER_BG_COLOR)
+        
+        # Update game over particles
+        if game_over_time > 0:
+            game_over_time -= 1
+            for particle in game_over_particles[:]:
+                particle.update()
+                if particle.size <= 0:
+                    game_over_particles.remove(particle)
+                    
+            # Draw game over particles
+            for particle in game_over_particles:
+                particle.draw(screen)
+        
+        # Draw flashing GAME OVER text
+        flash_intensity = int(128 + 127 * math.sin(pygame.time.get_ticks() * 0.01))
+        game_over_color = (255, flash_intensity, flash_intensity)
+        
+        game_over_text = big_font.render("GAME OVER", True, game_over_color)
+        game_over_rect = game_over_text.get_rect(center=(screen_width / 2, 180))
+        screen.blit(game_over_text, game_over_rect)
+        
+        # Level text
+        level_text = game_font.render(f"Level {current_level + 1}", True, (255, 200, 200))
+        level_rect = level_text.get_rect(center=(screen_width / 2, 240))
+        screen.blit(level_text, level_rect)
+        
+        # Final score
+        score_text = game_font.render(f"Final Score: {score}", True, (255, 200, 200))
+        score_rect = score_text.get_rect(center=(screen_width / 2, 280))
+        screen.blit(score_text, score_rect)
+        
+        # Draw buttons
+        retry_hover = is_button_hovered(game_over_retry_button_rect, mouse_pos)
+        draw_button(screen, game_over_retry_button_rect, "Retry Level", retry_hover, is_resume=True)
+        
+        menu_hover = is_button_hovered(game_over_menu_button_rect, mouse_pos)
+        draw_button(screen, game_over_menu_button_rect, "Main Menu", menu_hover)
+
+    # You Win Screen
+    elif game_state == 'you_win':
+        firework_timer -= 1
+        if firework_timer <= 0:
+            fireworks.append(Firework(screen_width, screen_height))
+            firework_timer = random.randint(20, 50)
+        
+        for firework in fireworks[:]:
+            firework.update()
+            if firework.is_dead():
+                fireworks.remove(firework)
+        
+        for firework in fireworks:
+            firework.draw(screen)
+
+        # You Win text
+        win_text = big_font.render("YOU WIN!", True, (100, 255, 100))
+        win_rect = win_text.get_rect(center=(screen_width / 2, 180))
+        screen.blit(win_text, win_rect)
         
         # Final score
         score_surface = game_font.render(f"Final Score: {score}", True, (255, 255, 255))
-        score_rect = score_surface.get_rect(center=(screen_width / 2, screen_height / 2 + 20))
+        score_rect = score_surface.get_rect(center=(screen_width / 2, 260))
         screen.blit(score_surface, score_rect)
         
         # Return to main menu message
         restart_surface = game_font.render("Press SPACE to return to Menu", True, (255, 255, 255))
-        restart_rect = restart_surface.get_rect(center=(screen_width / 2, screen_height / 2 + 60))
+        restart_rect = restart_surface.get_rect(center=(screen_width / 2, 320))
         screen.blit(restart_surface, restart_rect)
 
     # --- Update effects and messages (these run in all states) ---
