@@ -7,7 +7,6 @@ pygame.font.init()
 POWERUP_FONT = pygame.font.Font(None, 20)
 
 class Paddle:
-    # ... (This class is unchanged from the previous version)
     def __init__(self, screen_width, screen_height):
         self.screen_width = screen_width
         self.screen_height = screen_height
@@ -20,10 +19,12 @@ class Paddle:
         self.power_up_timers = {
             'grow': 0,
             'laser': 0,
-            'glue': 0
+            'glue': 0,
+            'shrink': 0  # Add timer for shrink power-up
         }
         self.has_laser = False
         self.has_glue = False
+        self.has_shrink = False  # Add tracking for shrink state
 
         self.rect = pygame.Rect(
             self.screen_width // 2 - self.width // 2,
@@ -38,6 +39,7 @@ class Paddle:
         self.rect.width = self.width
         self.has_laser = False
         self.has_glue = False
+        self.has_shrink = False  # Reset shrink state
         for power_up in self.power_up_timers:
             self.power_up_timers[power_up] = 0
 
@@ -58,23 +60,34 @@ class Paddle:
     def draw(self, screen):
         pygame.draw.rect(screen, self.color, self.rect)
         
-    def activate_power_up(self, type):
-        duration = 600
-        if type == 'grow':
-            if self.power_up_timers['grow'] <= 0:
-                current_center = self.rect.centerx
-                self.width = 150
-                self.rect.width = self.width
-                self.rect.centerx = current_center
-            self.power_up_timers['grow'] = duration
-        elif type == 'laser':
+    def activate_power_up(self, power_type):
+        # Store the current center position of the paddle
+        current_center = self.rect.centerx
+        
+        if power_type == 'grow':
+            self.width = min(self.width + 40, 200)  # Increase width but cap at 200
+            self.rect.width = self.width
+            self.power_up_timers['grow'] = 600  # 10 seconds at 60 FPS
+            
+        elif power_type == 'laser':
             self.has_laser = True
-            self.power_up_timers['laser'] = duration
-        elif type == 'glue':
+            self.power_up_timers['laser'] = 600
+            
+        elif power_type == 'glue':
             self.has_glue = True
-            self.power_up_timers['glue'] = duration
+            self.power_up_timers['glue'] = 600
+            
+        elif power_type == 'shrink':
+            self.width = max(self.width - 30, 50)  # Decrease width but not below 50
+            self.rect.width = self.width
+            self.power_up_timers['shrink'] = 450  # 7.5 seconds
+            self.has_shrink = True
+        
+        # Re-center the paddle after width change
+        self.rect.centerx = current_center
             
     def _update_power_ups(self):
+        # Grow power-up timer
         if self.power_up_timers['grow'] > 0:
             self.power_up_timers['grow'] -= 1
             if self.power_up_timers['grow'] <= 0:
@@ -82,18 +95,31 @@ class Paddle:
                 self.width = self.original_width
                 self.rect.width = self.width
                 self.rect.centerx = current_center
+        
+        # Laser power-up timer
         if self.power_up_timers['laser'] > 0:
             self.power_up_timers['laser'] -= 1
             if self.power_up_timers['laser'] <= 0:
                 self.has_laser = False
+        
+        # Glue power-up timer
         if self.power_up_timers['glue'] > 0:
             self.power_up_timers['glue'] -= 1
             if self.power_up_timers['glue'] <= 0:
                 self.has_glue = False
+                
+        # Shrink power-up timer
+        if self.power_up_timers['shrink'] > 0:
+            self.power_up_timers['shrink'] -= 1
+            if self.power_up_timers['shrink'] <= 0:
+                self.has_shrink = False
+                current_center = self.rect.centerx
+                self.width = self.original_width
+                self.rect.width = self.width
+                self.rect.centerx = current_center
 
 
 class Ball:
-    # ... (This class is unchanged from the previous version)
     def __init__(self, screen_width, screen_height):
         self.screen_width = screen_width
         self.screen_height = screen_height
@@ -103,7 +129,13 @@ class Ball:
         
         self.is_glued = False
         self.is_slowed = False
+        self.is_fast = False    # Add fast state tracking
+        self.is_strong = False  # Add strong state tracking
+        
         self.slow_timer = 0
+        self.fast_timer = 0     # Add fast timer
+        self.strong_timer = 0   # Add strong timer
+        
         self.base_speed = 6
         
         self.reset()
@@ -114,9 +146,29 @@ class Ball:
         self.speed_y = -self.base_speed
         self.is_glued = False
         self.is_slowed = False
+        self.is_fast = False
+        self.is_strong = False
         self.slow_timer = 0
+        self.fast_timer = 0
+        self.strong_timer = 0
 
     def update(self, paddle, launch_ball=False):
+        # Handle power-up timers
+        if self.is_slowed:
+            self.slow_timer -= 1
+            if self.slow_timer <= 0:
+                self.is_slowed = False
+        
+        if self.is_fast:
+            self.fast_timer -= 1
+            if self.fast_timer <= 0:
+                self.is_fast = False
+                
+        if self.is_strong:
+            self.strong_timer -= 1
+            if self.strong_timer <= 0:
+                self.is_strong = False
+        
         collision_object = None
 
         if self.is_glued:
@@ -128,16 +180,21 @@ class Ball:
                 self.speed_y = -self.base_speed
             return 'playing', None
 
+        # Calculate actual speed based on power-ups
+        speed_multiplier = 1.0
         if self.is_slowed:
-            self.slow_timer -= 1
-            if self.slow_timer <= 0:
-                self.speed_x = self.speed_x * 2
-                self.speed_y = self.speed_y * 2
-                self.is_slowed = False
+            speed_multiplier *= 0.5
+        if self.is_fast:
+            speed_multiplier *= 2.0
+        
+        current_speed_x = self.speed_x * speed_multiplier
+        current_speed_y = self.speed_y * speed_multiplier
 
-        self.rect.x += self.speed_x
-        self.rect.y += self.speed_y
+        # Apply movement with modified speed
+        self.rect.x += current_speed_x
+        self.rect.y += current_speed_y
 
+        # Handle collisions
         if self.rect.top <= 0:
             self.speed_y *= -1
             collision_object = 'wall'
@@ -157,18 +214,32 @@ class Ball:
         return 'playing', collision_object
 
     def draw(self, screen):
-        pygame.draw.ellipse(screen, self.color, self.rect)
+        # Change color based on power-ups
+        color = self.color
+        if self.is_strong:
+            color = (139, 0, 139)  # Purple for strong ball
+        elif self.is_fast:
+            color = (255, 69, 0)   # Orange for fast ball
+        elif self.is_slowed:
+            color = (100, 100, 255) # Blue for slow ball
+            
+        pygame.draw.ellipse(screen, color, self.rect)
         
-    def activate_power_up(self, type):
-        if type == 'slow' and not self.is_slowed:
-            self.speed_x /= 2
-            self.speed_y /= 2
+    def activate_power_up(self, power_type):
+        if power_type == 'slow':
             self.is_slowed = True
-            self.slow_timer = 600
+            self.is_fast = False  # Cancel fast if active
+            self.slow_timer = 600  # 10 seconds at 60 FPS
+        elif power_type == 'fast':
+            self.is_fast = True
+            self.is_slowed = False  # Cancel slow if active
+            self.fast_timer = 600  # 10 seconds
+        elif power_type == 'strong':
+            self.is_strong = True
+            self.strong_timer = 900  # 15 seconds
 
 
 class Brick:
-    # ... (This class is unchanged from the previous version)
     def __init__(self, x, y, width, height, color):
         self.rect = pygame.Rect(x, y, width, height)
         self.color = color
@@ -178,12 +249,20 @@ class Brick:
 
 
 class PowerUp:
-    # ... (This class is unchanged from the previous version)
+    # Update properties to include new power-ups with character identifiers
     PROPERTIES = {
+        # Original power-ups
         'grow': {'color': (60, 60, 255), 'char': 'G', 'message': 'PADDLE GROW'},
         'laser': {'color': (255, 60, 60), 'char': 'L', 'message': 'LASER CANNONS'},
         'glue': {'color': (60, 255, 60), 'char': 'C', 'message': 'CATCH PADDLE'},
         'slow': {'color': (255, 165, 0), 'char': 'S', 'message': 'SLOW BALL'},
+        
+        # New power-ups
+        'multi': {'color': (0, 255, 255), 'char': 'M', 'message': 'MULTI BALL!'},
+        'extra_life': {'color': (255, 105, 180), 'char': 'E', 'message': 'EXTRA LIFE!'},
+        'strong': {'color': (139, 0, 139), 'char': 'T', 'message': 'STRONG BALL!'},
+        'fast': {'color': (255, 69, 0), 'char': 'F', 'message': 'FAST BALL! (Watch out!)'},
+        'shrink': {'color': (255, 0, 0), 'char': 'R', 'message': 'PADDLE SHRINK! (Be careful!)'}
     }
     
     def __init__(self, x, y, type):
@@ -206,7 +285,6 @@ class PowerUp:
 
 
 class Laser:
-    # ... (This class is unchanged from the previous version)
     def __init__(self, x, y):
         self.width = 5
         self.height = 15

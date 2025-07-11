@@ -42,11 +42,12 @@ try:
     brick_break_sound = pygame.mixer.Sound('brick_break.wav')
     game_over_sound = pygame.mixer.Sound('game_over.wav')
     laser_sound = pygame.mixer.Sound('laser.wav')
+    powerup_sound = pygame.mixer.Sound('powerup.wav')
 except pygame.error as e:
     print(f"Warning: Sound file not found. {e}")
     class DummySound:
         def play(self): pass
-    bounce_sound, brick_break_sound, game_over_sound, laser_sound = DummySound(), DummySound(), DummySound(), DummySound()
+    bounce_sound = brick_break_sound = game_over_sound = laser_sound = powerup_sound = DummySound()
 
 # -- Mute Button Setup --
 is_muted = False
@@ -56,7 +57,7 @@ def toggle_mute():
     global is_muted
     is_muted = not is_muted
     volume = 0.0 if is_muted else 1.0
-    for sound in [bounce_sound, brick_break_sound, game_over_sound, laser_sound]:
+    for sound in [bounce_sound, brick_break_sound, game_over_sound, laser_sound, powerup_sound]:
         if hasattr(sound, 'set_volume'):  # Check if it's a real sound object
             sound.set_volume(volume)
 
@@ -101,11 +102,73 @@ def safe_reset_ball(ball, bricks, paddle):
     ball.speed_y = -ball.base_speed
     ball.is_glued = True  # Start with the ball glued to the paddle
     ball.is_slowed = False
+    ball.is_fast = False
+    ball.is_strong = False
     ball.slow_timer = 0
+    ball.fast_timer = 0
+    ball.strong_timer = 0
+
+# -- New function for creating a multi-ball --
+def create_multi_ball(main_ball):
+    new_ball = Ball(screen_width, screen_height)
+    new_ball.rect.centerx = main_ball.rect.centerx
+    new_ball.rect.centery = main_ball.rect.centery
+    # Give the new ball a random direction
+    angle = random.uniform(0.3, 0.7) * math.pi  # Random angle between 0.3π and 0.7π
+    new_ball.speed_x = main_ball.base_speed * math.cos(angle) * random.choice([-1, 1])
+    new_ball.speed_y = -main_ball.base_speed * math.sin(angle)
+    # Copy main ball's properties
+    new_ball.is_slowed = main_ball.is_slowed
+    new_ball.is_fast = main_ball.is_fast
+    new_ball.is_strong = main_ball.is_strong
+    new_ball.slow_timer = main_ball.slow_timer
+    new_ball.fast_timer = main_ball.fast_timer
+    new_ball.strong_timer = main_ball.strong_timer
+    
+    return new_ball
+
+# Function to check ball-brick collisions
+def check_ball_brick_collision(current_ball, bricks, power_ups, score, particles, is_muted):
+    bricks_to_remove = []
+    new_power_up = None
+    points_earned = 0
+    
+    for i, brick in enumerate(bricks):
+        if current_ball.rect.colliderect(brick.rect):
+            # Check if we should go through the brick (strong ball)
+            if not current_ball.is_strong:
+                current_ball.speed_y *= -1
+            
+            for _ in range(15):
+                particles.append(Particle(brick.rect.centerx, brick.rect.centery, 
+                                          brick.color, 1, 4, 1, 4, 0.05))
+            bricks_to_remove.append(i)
+            points_earned += 10
+            if not is_muted:
+                brick_break_sound.play()
+            
+            # Only create a power-up from the first brick hit in this frame
+            if random.random() < 0.3:
+                # Add new power-ups to the selection
+                power_up_type = random.choice([
+                    'grow', 'laser', 'glue', 'slow',  # Original power-ups
+                    'multi', 'extra_life', 'strong',  # New positive power-ups
+                    'fast', 'shrink'  # New negative power-ups
+                ])
+                new_power_up = PowerUp(brick.rect.centerx, brick.rect.centery, power_up_type)
+            break
+    
+    # Remove hit bricks (in reverse order to avoid index issues)
+    for i in reversed(bricks_to_remove):
+        if i < len(bricks):
+            del bricks[i]
+    
+    return points_earned, new_power_up
 
 # -- Game Objects --
 paddle = Paddle(screen_width, screen_height)
 ball = Ball(screen_width, screen_height)
+additional_balls = []  # For multi-ball power-up
 
 # --- Level Design Functions ---
 def create_basic_wall(rows=4, cols=10):
@@ -245,10 +308,17 @@ def create_level_buttons():
 
 level_buttons = create_level_buttons()
 
-# Main menu play button
+# Main menu buttons
 play_button_rect = pygame.Rect(
     (screen_width - 200) // 2,
-    300,
+    280,
+    200,
+    50
+)
+
+exit_button_rect = pygame.Rect(
+    (screen_width - 200) // 2,
+    350,
     200,
     50
 )
@@ -320,7 +390,8 @@ saved_game_state = {
     'paddle_state': None,
     'ball_state': None,
     'power_ups': [],
-    'lasers': []
+    'lasers': [],
+    'additional_balls': []
 }
 
 def save_game_state():
@@ -337,6 +408,7 @@ def save_game_state():
             'width': paddle.width,
             'has_laser': paddle.has_laser,
             'has_glue': paddle.has_glue,
+            'has_shrink': paddle.has_shrink,
             'power_up_timers': paddle.power_up_timers.copy()
         },
         'ball_state': {
@@ -345,15 +417,20 @@ def save_game_state():
             'speed_y': ball.speed_y,
             'is_glued': ball.is_glued,
             'is_slowed': ball.is_slowed,
-            'slow_timer': ball.slow_timer
+            'is_fast': ball.is_fast,
+            'is_strong': ball.is_strong,
+            'slow_timer': ball.slow_timer,
+            'fast_timer': ball.fast_timer,
+            'strong_timer': ball.strong_timer
         },
         'power_ups': power_ups.copy(),
-        'lasers': lasers.copy()
+        'lasers': lasers.copy(),
+        'additional_balls': additional_balls.copy()
     }
     has_paused_game = True
 
 def restore_game_state():
-    global current_level, bricks, score, lives, power_ups, lasers
+    global current_level, bricks, score, lives, power_ups, lasers, additional_balls
     
     # Restore game state from saved state
     current_level = saved_game_state['level']
@@ -367,6 +444,7 @@ def restore_game_state():
     paddle.width = paddle_state['width']
     paddle.has_laser = paddle_state['has_laser']
     paddle.has_glue = paddle_state['has_glue']
+    paddle.has_shrink = paddle_state['has_shrink']
     paddle.power_up_timers = paddle_state['power_up_timers']
     
     # Restore ball state
@@ -376,14 +454,19 @@ def restore_game_state():
     ball.speed_y = ball_state['speed_y']
     ball.is_glued = ball_state['is_glued']
     ball.is_slowed = ball_state['is_slowed']
+    ball.is_fast = ball_state['is_fast']
+    ball.is_strong = ball_state['is_strong']
     ball.slow_timer = ball_state['slow_timer']
+    ball.fast_timer = ball_state['fast_timer']
+    ball.strong_timer = ball_state['strong_timer']
     
     # Restore other objects
     power_ups = saved_game_state['power_ups']
     lasers = saved_game_state['lasers']
+    additional_balls = saved_game_state['additional_balls']
 
 def reset_game(level_index=0):
-    global bricks, score, lives, power_ups, lasers, particles, fireworks, current_level
+    global bricks, score, lives, power_ups, lasers, particles, fireworks, current_level, additional_balls
     
     paddle.reset()
     
@@ -400,6 +483,7 @@ def reset_game(level_index=0):
     lasers.clear()
     particles.clear()
     fireworks.clear()
+    additional_balls.clear()
 
 # Draw semi-transparent overlay for pause screen
 def draw_pause_overlay(screen):
@@ -467,6 +551,10 @@ while True:
                 if play_button_rect.collidepoint(event.pos):
                     previous_state = game_state
                     game_state = 'level_select'
+                
+                if exit_button_rect.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
             
             # Level select screen interactions
             elif game_state == 'level_select':
@@ -534,10 +622,14 @@ while True:
         play_hover = is_button_hovered(play_button_rect, mouse_pos)
         draw_button(screen, play_button_rect, "Play", play_hover)
         
+        # Draw the exit button
+        exit_hover = is_button_hovered(exit_button_rect, mouse_pos)
+        draw_button(screen, exit_button_rect, "Exit", exit_hover, is_reset=True)
+        
         # Show resume indicator if there's a saved game
         if has_paused_game:
             resume_info = message_font.render("(You have a game in progress)", True, (200, 200, 200))
-            resume_rect = resume_info.get_rect(center=(screen_width / 2, 370))
+            resume_rect = resume_info.get_rect(center=(screen_width / 2, 420))
             screen.blit(resume_info, resume_rect)
 
     # Level Select Screen
@@ -562,51 +654,87 @@ while True:
         paddle.update()
         keys = pygame.key.get_pressed()
         ball_status, collision_object = ball.update(paddle, keys[pygame.K_SPACE])
+        
+        # Update all additional balls
+        balls_to_remove = []
+        for i, extra_ball in enumerate(additional_balls):
+            status, collision = extra_ball.update(paddle, keys[pygame.K_SPACE])
+            if status == 'lost':
+                balls_to_remove.append(i)
+            elif collision in ['wall', 'paddle']:
+                if not is_muted:
+                    bounce_sound.play()
+                for _ in range(3):
+                    particles.append(Particle(extra_ball.rect.centerx, extra_ball.rect.centery, 
+                                              (255, 255, 0), 1, 2, 1, 2, 0))
+        
+        # Remove lost balls
+        for i in reversed(balls_to_remove):
+            del additional_balls[i]
 
         if ball_status == 'lost':
-            lives -= 1
-            if lives <= 0:
-                game_state = 'game_over'
-                create_game_over_explosion()  # Create explosion effect
-                has_paused_game = False  # Clear paused game when game over
-                if not is_muted:
-                    game_over_sound.play()
+            # Only lose a life if there are no additional balls
+            if not additional_balls:
+                lives -= 1
+                if lives <= 0:
+                    game_state = 'game_over'
+                    create_game_over_explosion()  # Create explosion effect
+                    has_paused_game = False  # Clear paused game when game over
+                    if not is_muted:
+                        game_over_sound.play()
+                else:
+                    # Use safe ball reset
+                    safe_reset_ball(ball, bricks, paddle)
+                    paddle.reset()
             else:
-                # Use safe ball reset
-                safe_reset_ball(ball, bricks, paddle)
-                paddle.reset()
+                # If we have additional balls, just remove the main ball
+                # and make one of the additional balls the new main ball
+                ball = additional_balls.pop(0)
+                
         elif collision_object in ['wall', 'paddle']:
             if not is_muted:
                 bounce_sound.play()
             for _ in range(5):
                 particles.append(Particle(ball.rect.centerx, ball.rect.centery, (255, 255, 0), 1, 3, 1, 3, 0))
 
-        for brick in bricks[:]:
-            if ball.rect.colliderect(brick.rect):
-                ball.speed_y *= -1
-                for _ in range(15):
-                    particles.append(Particle(brick.rect.centerx, brick.rect.centery, brick.color, 1, 4, 1, 4, 0.05))
-                bricks.remove(brick)
-                score += 10
-                if not is_muted:
-                    brick_break_sound.play()
-                if random.random() < 0.3:
-                    power_up_type = random.choice(['grow', 'laser', 'glue', 'slow'])
-                    power_up = PowerUp(brick.rect.centerx, brick.rect.centery, power_up_type)
-                    power_ups.append(power_up)
-                break
+        # Ball collision with bricks - main ball
+        points, new_power_up = check_ball_brick_collision(ball, bricks, power_ups, score, particles, is_muted)
+        score += points
+        if new_power_up:
+            power_ups.append(new_power_up)
+        
+        # Ball collision with bricks - additional balls
+        for extra_ball in additional_balls:
+            points, new_power_up = check_ball_brick_collision(extra_ball, bricks, power_ups, score, particles, is_muted)
+            score += points
+            if new_power_up:
+                power_ups.append(new_power_up)
         
         for power_up in power_ups[:]:
             power_up.update()
             if power_up.rect.top > screen_height:
                 power_ups.remove(power_up)
             elif paddle.rect.colliderect(power_up.rect):
-                display_message = power_up.PROPERTIES[power_up.type]['message']
+                display_message = PowerUp.PROPERTIES[power_up.type]['message']
                 message_timer = 120
-                if power_up.type in ['grow', 'laser', 'glue']:
+                if not is_muted:
+                    powerup_sound.play()
+                
+                # Handle the power-up effects
+                if power_up.type == 'multi':
+                    # Create 2 new balls
+                    for _ in range(2):
+                        additional_balls.append(create_multi_ball(ball))
+                elif power_up.type == 'extra_life':
+                    lives += 1
+                elif power_up.type in ['grow', 'laser', 'glue', 'shrink']:
                     paddle.activate_power_up(power_up.type)
-                elif power_up.type == 'slow':
+                elif power_up.type in ['slow', 'fast', 'strong']:
                     ball.activate_power_up(power_up.type)
+                    # Apply to all additional balls too
+                    for extra_ball in additional_balls:
+                        extra_ball.activate_power_up(power_up.type)
+                
                 power_ups.remove(power_up)
         
         for laser in lasers[:]:
@@ -632,10 +760,11 @@ while True:
                 paddle.reset()
                 level = LEVELS[current_level]
                 bricks = level["create_function"](**level["args"])
-                display_message = f"Level {current_level + 1}: {level['name']}"
+                display_message = f"{level['name']}"
                 message_timer = 180
                 power_ups.clear()
                 lasers.clear()
+                additional_balls.clear()  # Clear additional balls between levels
                 # Use safe ball reset for next level
                 safe_reset_ball(ball, bricks, paddle)
             else:
@@ -645,6 +774,8 @@ while True:
         # --- Draw all game objects ---
         paddle.draw(screen)
         ball.draw(screen)
+        for extra_ball in additional_balls:
+            extra_ball.draw(screen)
         for brick in bricks:
             brick.draw(screen)
         for power_up in power_ups:
@@ -668,12 +799,39 @@ while True:
         # Pause button
         hover = is_button_hovered(pause_button_rect, mouse_pos)
         draw_button(screen, pause_button_rect, "Pause", hover)
+        
+        # Active power-ups indicators
+        active_powers = []
+        if ball.is_slowed:
+            active_powers.append(("Slow Ball", (100, 100, 255)))
+        if ball.is_fast:
+            active_powers.append(("Fast Ball", (255, 69, 0)))
+        if ball.is_strong:
+            active_powers.append(("Strong Ball", (139, 0, 139)))
+        if paddle.has_laser:
+            active_powers.append(("Lasers", (0, 255, 0)))
+        if paddle.has_glue:
+            active_powers.append(("Glue", (255, 255, 0)))
+        if paddle.has_shrink:
+            active_powers.append(("Shrink", (255, 0, 0)))
+        
+        # Display active power-ups in bottom-left corner
+        for i, (power_name, power_color) in enumerate(active_powers):
+            power_text = message_font.render(power_name, True, power_color)
+            screen.blit(power_text, (10, screen_height - 30 - i * 25))
+
+        # Display ball count if there are multiple balls
+        if additional_balls:
+            ball_count_text = message_font.render(f"Balls: {len(additional_balls) + 1}", True, (0, 255, 255))
+            screen.blit(ball_count_text, (screen_width - 100, screen_height - 30))
 
     # Pause Screen
     elif game_state == 'paused':
         # First draw the game screen underneath
         paddle.draw(screen)
         ball.draw(screen)
+        for extra_ball in additional_balls:
+            extra_ball.draw(screen)
         for brick in bricks:
             brick.draw(screen)
         for power_up in power_ups:
